@@ -1,0 +1,143 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+require "base64"
+
+options = {}
+OptionParser
+  .new do |opt|
+    opt.banner =
+      'Usage: v2c [options] [link] [path] [misc]
+Example: v2c --vless "vless://xyz" "$HOME/provider.yaml"
+Options:'
+    # Parse vmess
+    opt.on("--vmess", "Convert vmess link to .yaml format") do |vmess|
+      options[:vmess] = vmess
+      abort("#{opt}") unless ARGV[0]
+
+      # Case not vmess
+      abort(" [i] Not a vmess link !") unless ARGV[0].match /^vmess:(.*)/
+      # Case path nil
+      abort(" [i] Path not specified !") unless ARGV[1]
+
+      # prepare parsing the vmess
+      vmessParse = ARGV[0]
+      vmessParse = vmessParse[5...].delete! "(://)"
+      vmessParse = Base64.decode64(vmessParse)
+      vmessParse = vmessParse.gsub! ",", "\n"
+
+      # change global symbols
+      replaceIt = { "ps" => "name", "net" => "network" }
+      vmessParse = vmessParse.gsub(/\w+/) { |m| replaceIt.fetch(m, m) }
+      vmessParse = vmessParse.delete! '({}), (")'
+      vmessParse = vmessParse.gsub! ":", ": "
+
+      # Case file exist
+      # by default will append to file
+      if File.exist?("#{ARGV[1]}") == true
+        mode = "a"
+      else
+        mode = "w"
+        proxies = "proxies:"
+      end
+
+      # need --force arguments to
+      # overwrite the file
+      if ARGV[2] == ("--force" || "-f")
+        mode = "w"
+        proxies = "proxies:"
+      end
+
+      file =
+        File.open("#{ARGV[1]}", "#{mode}") do |f|
+          f.write "#{proxies}
+  - #{vmessParse.match /^name: (.*)/}_#{(Time.now.to_f * 1000).to_i}
+    server: #{/^add: (.*)/.match(vmessParse)[1]}
+    port: #{/^port: (.*)/.match(vmessParse)[1]}
+    type: vmess
+    uuid: #{/^id: (.*)/.match(vmessParse)[1]}
+    alterId: #{/^aid: (.*)/.match(vmessParse)[1]}
+    cipher: #{/^scy: (.*)/.match(vmessParse)[1]}
+    udp: true
+    skip-cert-verify: true
+    servername: #{/^sni: (.*)/.match(vmessParse)[1]}
+    #{vmessParse.match /^network: (.*)/}
+    ws-opts:
+     path: #{/^path: (.*)/.match(vmessParse)[1]}
+     headers:
+       Host: #{/^host: (.*)/.match(vmessParse)[1]}"
+        end
+      puts "\n [i] vmess exported to: #{ARGV[1]}"
+    end
+    # Parse vless
+    opt.on("--vless", "Convert vless to .yaml format") do |vless|
+      options[:vless] = vless
+      abort("#{opt}") unless ARGV[0]
+
+      vlessParse = ARGV[0]
+      vlessParse = vlessParse.gsub(/&|\?/, "\n")
+
+      replaceIt = Array[
+        "vless://", "uuid=",
+        "@", "\nserver=",
+        ":", "\nport=",
+        "#", "\nname=",
+        "%2F", "/",
+        "=", ": "
+      ]
+      len = replaceIt.length
+      r = Array.new(len)
+
+      for i in ( 0...len/2 ) do
+        if (len.even? == true)
+          search = i*2
+        end
+        vlessParse = vlessParse.gsub("#{replaceIt[search]}", "#{replaceIt[(search+1)]}")
+      end
+
+      # Case file exist
+      # by default will append to file
+      if File.exist?("#{ARGV[1]}") == true
+        mode = "a"
+      else
+        mode = "w"
+        proxies = "proxies:"
+      end
+
+      # need --force arguments to
+      # overwrite the file
+      if ARGV[2] == ("--force" || "-f")
+        mode = "w"
+        proxies = "proxies:"
+      end
+
+      file =
+        File.open("#{ARGV[1]}", "#{mode}") do |f|
+          f.write "#{proxies}
+  - #{vlessParse.match /^name: (.*)/}_#{(Time.now.to_f * 1000).to_i}
+    type: vless
+    #{/^server: (.*)/.match(vlessParse)}
+    #{/^port: (.*)/.match(vlessParse)}
+    #{/^uuid: (.*)/.match(vlessParse)}
+    cipher: auto
+    tls: true
+    skip-cert-verify: true
+    servername: #{/^sni: (.*)/.match(vlessParse)[1]}
+    network: #{/^type: (.*)/.match(vlessParse)[1]}
+    ws-opts:
+      path: #{/^path: (.*)/.match(vlessParse)[1]}
+      headers:
+        Host: #{/^host: (.*)/.match(vlessParse)[1]}
+    udp: true"
+        end
+    puts "\n [i] vless exported to: #{ARGV[1]}"
+    end
+    
+    opt.on("-f", "--force", "Be careful this will force overwrite file") do |force|
+      options[:force] = force
+    end
+    opt.on("-h", "--help", "Print this help") { puts opt }
+
+    puts opt unless ARGV[0]
+  end
+  .parse!
